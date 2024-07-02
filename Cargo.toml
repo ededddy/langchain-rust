@@ -27,16 +27,16 @@ async-openai = "0.23.0"
 mockito = "1.4.0"
 tiktoken-rs = "0.5.8"
 sqlx = { version = "0.7.4", default-features = false, features = [
-    "postgres",
-    "sqlite",
-    "runtime-tokio-native-tls",
-    "json",
-    "uuid",
+	"postgres",
+	"sqlite",
+	"runtime-tokio-native-tls",
+	"json",
+	"uuid",
 ], optional = true }
 uuid = { version = "1.8.0", features = ["v4"], optional = true }
 pgvector = { version = "0.3.2", features = [
-    "postgres",
-    "sqlx",
+	"postgres",
+	"sqlx",
 ], optional = true }
 text-splitter = { version = "0.14", features = ["tiktoken-rs", "markdown"] }
 surrealdb = { version = "1.4.2", optional = true, default-features = false }
@@ -53,13 +53,13 @@ url = "2.5.0"
 fastembed = { version = "3", optional = true }
 flume = { version = "0.11.0", optional = true }
 gix = { version = "0.63.0", default-features = false, optional = true, features = [
-    "parallel",
-    "revision",
-    "serde",
+	"parallel",
+	"revision",
+	"serde",
 ] }
 opensearch = { version = "2", optional = true, features = ["aws-auth"] }
 aws-config = { version = "1.2", optional = true, features = [
-    "behavior-version-latest",
+	"behavior-version-latest",
 ] }
 glob = "0.3.1"
 strum_macros = "0.26.2"
@@ -74,23 +74,34 @@ tree-sitter-python = { version = "0.21", optional = true }
 tree-sitter-typescript = { version = "0.21", optional = true }
 qdrant-client = { version = "1.9.0", optional = true }
 ollama-rs = { version = "0.2.0", optional = true, features = [
-    "stream",
-    "chat-history",
+	"stream",
+	"chat-history",
 ] }
+lancedb = { version = "0.6.0", optional = true }
+serde_arrow = { version = "0.11.6", optional = true, features = ["arrow-51"] }
+# Note that this one does not include pyarrow
+arrow = { version = "51.0", optional = true }
+arrow-array = { version = "51.0", optional = true }
+arrow-data = { version = "51.0", optional = true }
+arrow-ipc = { version = "51.0", optional = true }
+arrow-ord = { version = "51.0", optional = true }
+arrow-schema = { version = "51.0", optional = true }
+arrow-cast = { version = "51.0", optional = true }
+arrow-arith = { version = "51.0", optional = true }
 
 [features]
 default = []
 postgres = ["pgvector", "sqlx", "uuid"]
 tree-sitter = [
-    "cc",
-    "dep:tree-sitter",
-    "dep:tree-sitter-rust",
-    "dep:tree-sitter-cpp",
-    "dep:tree-sitter-javascript",
-    "dep:tree-sitter-c",
-    "dep:tree-sitter-go",
-    "dep:tree-sitter-python",
-    "dep:tree-sitter-typescript",
+	"cc",
+	"dep:tree-sitter",
+	"dep:tree-sitter-rust",
+	"dep:tree-sitter-cpp",
+	"dep:tree-sitter-javascript",
+	"dep:tree-sitter-c",
+	"dep:tree-sitter-go",
+	"dep:tree-sitter-python",
+	"dep:tree-sitter-typescript",
 ]
 surrealdb = ["dep:surrealdb"]
 sqlite = ["sqlx"]
@@ -99,6 +110,19 @@ opensearch = ["dep:opensearch", "aws-config"]
 qdrant = ["qdrant-client", "uuid"]
 ollama = ["ollama-rs"]
 fastembed = ["dep:fastembed"]
+lancedb = [
+	"dep:lancedb",
+	"dep:arrow",
+	"dep:arrow-array",
+	"dep:arrow-data",
+	"dep:arrow-ipc",
+	"dep:arrow-ord",
+	"dep:arrow-schema",
+	"dep:arrow-arith",
+	"dep:arrow-cast",
+	"dep:serde_arrow",
+	"uuid",
+]
 
 [dev-dependencies]
 tokio-test = "0.4.4"
