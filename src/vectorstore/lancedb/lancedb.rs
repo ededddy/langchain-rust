@@ -1,8 +1,11 @@
 use std::{error::Error, sync::Arc};
 
 use crate::{embedding::Embedder, schemas::Document, vectorstore::VectorStore};
-use arrow_array::{Float64Array, RecordBatchIterator};
-use arrow_schema::FieldRef;
+use arrow::datatypes::Float64Type;
+use arrow_array::{
+    FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray,
+};
+use arrow_schema::{DataType, Field};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use lancedb::{
@@ -12,7 +15,6 @@ use lancedb::{
     Connection, DistanceType,
 };
 use serde::{Deserialize, Serialize};
-use serde_arrow::schema::{SchemaLike, TracingOptions};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -31,6 +33,15 @@ pub struct VectorRecord {
     pub text_embedding: Vec<f64>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct SearchResponse {
+    pub id: String,
+    pub text: String,
+    pub metadata: String,
+    pub text_embedding: Vec<f64>,
+    _distance: Vec<f64>,
+}
+
 impl Store {
     pub async fn initialize(&self) -> Result<(), Box<dyn Error>> {
         self.create_table_if_not_exists().await?;
@@ -38,10 +49,24 @@ impl Store {
     }
 
     async fn create_table_if_not_exists(&self) -> Result<(), Box<dyn Error>> {
-        let schema = Vec::<FieldRef>::from_type::<VectorRecord>(TracingOptions::default())?;
         let tb = self
             .connection
-            .create_empty_table(&self.table, Arc::new(Schema::new(schema)))
+            .create_empty_table(
+                &self.table,
+                Arc::new(Schema::new(vec![
+                    Field::new("id", DataType::Utf8, false),
+                    Field::new("text", DataType::Utf8, false),
+                    Field::new("metadata", DataType::Utf8, false),
+                    Field::new(
+                        "text_embedding",
+                        DataType::FixedSizeList(
+                            Arc::new(Field::new("vector", DataType::Float64, false)),
+                            self.vector_dimensions,
+                        ),
+                        false,
+                    ),
+                ])),
+            )
             .execute()
             .await;
         match tb {
@@ -98,10 +123,11 @@ impl VectorStore for Store {
                 "Number of vectors and documents do not match",
             )));
         }
+        let table = self.connection.open_table(&self.table).execute().await?;
+        let schema = table.schema().await?;
 
-        let schema = Vec::<FieldRef>::from_type::<VectorRecord>(TracingOptions::default())?;
         let vector_records: Vec<VectorRecord> = docs
-            .into_iter()
+            .iter()
             .zip(vectors)
             .map(|(d, v)| VectorRecord {
                 id: Uuid::new_v4().to_string(),
@@ -115,10 +141,39 @@ impl VectorStore for Store {
         let tb = self.connection.open_table(table).execute().await?;
 
         let batches = RecordBatchIterator::new(
-            vec![serde_arrow::to_record_batch(&schema, &vector_records)?]
-                .into_iter()
-                .map(Ok),
-            tb.schema().await?.clone(),
+            vec![RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(StringArray::from_iter_values(
+                        vector_records.iter().map(|d| d.id.clone()),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        vector_records.iter().map(|d| d.text.clone()),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        vector_records.iter().map(|d| d.metadata.clone()),
+                    )),
+                    Arc::new(
+                        FixedSizeListArray::from_iter_primitive::<Float64Type, _, _>(
+                            vector_records
+                                .iter()
+                                .map(|d| {
+                                    d.text_embedding
+                                        .clone()
+                                        .into_iter()
+                                        .map(Some)
+                                        .collect::<Vec<Option<f64>>>()
+                                })
+                                .map(Some),
+                            self.vector_dimensions,
+                        ),
+                    ),
+                ],
+            )
+            .unwrap()]
+            .into_iter()
+            .map(Ok),
+            schema.clone(),
         );
 
         let ids: Vec<String> = vector_records.into_iter().map(|v| v.id.clone()).collect();
@@ -141,7 +196,7 @@ impl VectorStore for Store {
             .query()
             .nearest_to(query_vector)
             .unwrap()
-            .column("text_embeddings")
+            .column("text_embedding")
             .distance_type(DistanceType::Cosine)
             .limit(limit)
             .execute()
@@ -152,22 +207,32 @@ impl VectorStore for Store {
             .unwrap();
         let mut items: Vec<Document> = Vec::with_capacity(results.len());
         for result in results {
-            let scores: Vec<f64> = result
+            let len = result.num_rows();
+            let contents = result
+                .column_by_name("text")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let metadatas = result
+                .column_by_name("metadata")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let scores = result
                 .column_by_name("_distance")
                 .unwrap()
                 .as_any()
-                .downcast_ref::<Float64Array>()
-                .unwrap()
-                .values()
-                .to_vec();
-            let vec_record: Vec<VectorRecord> = serde_arrow::from_record_batch(&result)?;
-            vec_record.into_iter().enumerate().for_each(|(i, vr)| {
+                .downcast_ref::<Float32Array>()
+                .unwrap();
+            for i in 0..len {
                 items.push(Document {
-                    page_content: vr.text,
-                    metadata: serde_json::from_str(&vr.metadata).unwrap(),
-                    score: scores[i],
+                    page_content: contents.value(i).into(),
+                    metadata: serde_json::from_str(metadatas.value(i)).unwrap(),
+                    score: scores.value(i).into(),
                 })
-            })
+            }
         }
         Ok(items)
     }
